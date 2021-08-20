@@ -31,26 +31,32 @@ logging.basicConfig(
 )
 
 class LanguageDetectorTranslator:
+
+# constructor
     def __init__(self):
         USER = os.environ.get("SNOWFLAKE_USER") or 'AWS_USER'
         PASSWORD = os.environ.get("SNOWFLAKE_PASSWORD") or '56gdd3de1xt2sdgSs1'
         ACCOUNT = os.environ.get("SNOWFLAKE_ACCOUNT") or 'vr09222.us-east-2.aws'
         ROLE = os.environ.get("SNOWFLAKE_ROLE") or 'SYSADMIN'
-        self.country_codes = pd.read_csv(os.environ.get("COUNTRY_MAPPING_PATH"))
+        # self.country_codes = pd.read_csv(os.environ.get("COUNTRY_MAPPING_PATH"))
+        self.country_codes = pd.read_csv(r'/Users/subhayan_pc/Documents/Quattr/keyword_language_translations/language_mapping.csv')
         self.translation_calls = 0
         self.failed_translation_calls = 0
         self.passby_translation_calls = 0
-        self.CUSTOMER = os.environ.get("CUSTOMER") or 'HSNG'
-        self.DEPLOY_ENVIRONMENT = os.environ.get("DEPLOY_ENVIRONMENT") or 'PROD'
-        self.INTENT_TABLE = os.environ.get("SNOWFLAKE_INTENT_TABLE") or 'INTENT_LOOKUP'
+        self.CUSTOMER = os.environ.get("CUSTOMER") or 'ARYK'
+        self.DEPLOY_ENVIRONMENT = os.environ.get("DEPLOY_ENVIRONMENT") or 'BACKUP_DB'
+        self.INTENT_TABLE = os.environ.get("SNOWFLAKE_INTENT_TABLE") or 'intent_lookup_test_hund'
         self.LOOKUP_TABLE = os.environ.get("SNOWFLAKE_LOOKUP_TABLE")
-        self.SCHEMA = os.environ.get("SCHEMA") or 'CLICKSTREAM_ANALYTICS_HSNG'
+        self.SCHEMA = os.environ.get("SCHEMA") or 'CLICKSTREAM_ANALYTICS_ARYK'
         self.BKP_DEPLOY = os.environ.get("BKP_DEPLOY") or 'BACKUP_DB'
         self.API_KEY = os.environ.get("API_KEY") or 'AIzaSyBofuxaa1n79Ejut8E69KgUJlEQCfDFiCU'
-        self.QUERY_LIMIT = os.environ.get("QUERY_LIMIT") or 20000
+        self.QUERY_LIMIT = os.environ.get("QUERY_LIMIT") or 1000
         self.SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
         self.API_ENDPOINT = "https://translation.googleapis.com/language/translate/v2?target=en&key={1}&q={0}"
-        self.NEW_KEYWORDS = os.environ.get("BASE_QUERY").format(
+        # self.NEW_KEYWORDS = os.environ.get("BASE_QUERY").format(
+        #     self.DEPLOY_ENVIRONMENT, self.SCHEMA, self.INTENT_TABLE, self.QUERY_LIMIT
+        # )
+        self.NEW_KEYWORDS = ("select distinct QUERY, QUERY_LANGUAGE, TRANSLATED_QUERY, INTENT, QUERY_LANGUAGE_CODE, IS_BRANDED from {0}.{1}.{2} where TRANSLATED_QUERY is null or QUERY_LANGUAGE_CODE is null LIMIT {3}").format(
             self.DEPLOY_ENVIRONMENT, self.SCHEMA, self.INTENT_TABLE, self.QUERY_LIMIT
         )
         #PROD.CLICKSTREAM_ANALYTICS_HSNG.INTENT_LOOKUP 
@@ -58,9 +64,9 @@ class LanguageDetectorTranslator:
         self.S3_BACKUP = "{0}_job_{1}{2}".format(
             os.environ.get("S3_BACKUP"), time.time(), ".csv.gzip"
         )
-        self.BATCH_SIZE = int(os.environ.get("BATCH_SIZE"))
+        self.BATCH_SIZE = int(os.environ.get("BATCH_SIZE") or 1000)
         self.s3 = s3fs.S3FileSystem(anon=False)
-        self.model = fasttext.load_model("./lid.176.ftz")
+        # self.model = fasttext.load_model("./lid.176.ftz")
         self.temp_table = None
 
         try:
@@ -135,7 +141,7 @@ class LanguageDetectorTranslator:
         tx = []
         for each in text.split(' '):
             tx.append(re.sub('[^a-zA-Z0-9-_*.]', '', each))
-    #         tx.append(re.sub('[^A-Za-z0-9]+', ' ', each.lower()))
+        #         tx.append(re.sub('[^A-Za-z0-9]+', ' ', each.lower()))
         text = ' '.join(tx)
         if all:
             # remove tags
@@ -214,6 +220,7 @@ class LanguageDetectorTranslator:
         Imp_words = Imp_words + BOD
         return Imp_words
 
+# function to run sql query
     def fetch_all_sql(self, query):
         for i in range(3):
             try:
@@ -234,6 +241,8 @@ class LanguageDetectorTranslator:
             finally:
                 self.cur.close()
 
+
+# Update the intent_lookup table and create a backup table in backup_db 
     def update_intent_table(self):
         logging.info("Updating the Language Translations in Intent LookUp")
         logging.info("TRANSLATION CALLS #: %s" % self.translation_calls)
@@ -268,7 +277,7 @@ class LanguageDetectorTranslator:
                     [
                         series.at["QUERY_LANGUAGE"],
                         series.at["QUERY_LANGUAGE_CODE"],
-                        series.at["TRANSLATED_QUERY"],
+                        series.at["TRANSLATED_QUERY"].strip(),
                         series.at["QUERY"],
                         series.at['GCP_TRANSLATED_QUERY'],
                         series.at["GCP_QUERY_LANGUAGE_CODE"],
@@ -311,7 +320,7 @@ class LanguageDetectorTranslator:
                     on target_table.QUERY = source_table.QUERY
                        when matched then update 
                        set target_table.QUERY_LANGUAGE_CODE = source_table.QUERY_LANGUAGE_CODE 
-                       ,target_table.TRANSLATED_QUERY = source_table.TRANSLATED_QUERY
+                       ,target_table.TRANSLATED_QUERY = trim(source_table.TRANSLATED_QUERY)
                        ,target_table.QUERY_LANGUAGE = source_table.QUERY_LANGUAGE
                     """.format(
                 translation_table, base_table
@@ -331,6 +340,8 @@ class LanguageDetectorTranslator:
         finally:
             self.cur.close()
 
+
+# function to get new keywords whose translated_query is null 
     def load_new_keywords(self):
         # Query Lanaguge field in intent lookup
         logging.info(self.NEW_KEYWORDS)
@@ -338,6 +349,7 @@ class LanguageDetectorTranslator:
         logging.info("Loaded rows: %s" % self.keyword_df.count())
         self.get_keyword_language()
 
+# fuction to call fasttext 
     def fasttext_lang_detect(self, row):
         if (
             not (pd.isnull(row["QUERY_LANGUAGE_CODE"]))
@@ -355,6 +367,7 @@ class LanguageDetectorTranslator:
                 detected_languages = "un"
             return detected_languages
 
+# function to call polyglot.detector for language detection
     def polyglot_language_detector(self, row):
         """
         Returns the multiple languages with confidence value.For now it's only top 1
@@ -372,10 +385,12 @@ class LanguageDetectorTranslator:
             detected_languages = "Unassigned"
         return detected_languages
 
+# to get the translation using google api
     def cloud_translation(self, query):
         resp = requests.get(self.API_ENDPOINT.format(query, self.API_KEY))
         return resp
 
+# to detect the language using polyglot detector
     def get_keyword_language(self):
         cnt = self.keyword_df.QUERY.count()
         logging.info("IN GET QUERY LANGUAGE #: %d" % self.keyword_df.QUERY.count())
@@ -407,6 +422,8 @@ class LanguageDetectorTranslator:
         else:
             logging.info("No new records for language detection")
 
+
+# to strip all special characters
     def validate_digits_special_charaters(self, query):
         string_match = list(
             filter(str.strip, (list(re.findall(r"[0-9(\s+*&^%$#@!\-\/\\\+)]+", query))))
@@ -421,8 +438,10 @@ class LanguageDetectorTranslator:
         else:
             return True
 
-    def get_keyword_translation(self, row):
+#edited by subhayan 19_08_2021 for custoer independent ranslation
+    def get_translation_independent(self, row):
         self.keyword_df.drop_duplicates(["QUERY"], keep="last", inplace=True)
+# english translated word
         if row["QUERY_LANGUAGE_CODE"] == "en":
             self.passby_translation_calls = self.passby_translation_calls + 1
             return pd.Series(
@@ -435,6 +454,7 @@ class LanguageDetectorTranslator:
                     "GCP_QUERY_LANGUAGE": None,
                 }
             )
+#word without detected language
         elif row["TRANSLATED_QUERY"] is not None:
             self.passby_translation_calls = self.passby_translation_calls + 1
             return pd.Series(
@@ -449,6 +469,1035 @@ class LanguageDetectorTranslator:
             )
         else:
             try:
+                if (
+                        self.validate_digits_special_charaters(row["QUERY"].strip("\u202c"))
+                        and len(row["QUERY"]) < 150
+                    ): 
+                        com_present_flag = 0
+                        com_w_comma_present_flag = 0
+                        xom_present_flag = 0
+                        ca_present_flag = 0
+                        om_present_flag = 0
+                        com_word_present_flag = 0
+                        xom_word_present_flag = 0
+                        abbr_present_flag = 0
+                        carte_flag = 0
+                        com_index = None
+                        com_w_comma_index = None
+                        xom_index = None
+                        ca_index = None
+                        om_index = None
+                        word_before_com = ''
+                        word_before_com_w_comma = ''
+                        word_before_xom = ''
+                        word_before_ca = ''
+                        word_before_om = ''
+                        inp_keyword = row["QUERY"]
+                        abbr_list = self.get_abbr_list()
+                        abbr_dict = dict()
+                        com_word_dict = dict()
+                        xom_word_dict = dict()
+                        row_split = ((str(row["QUERY"])).lower()).split(" ")
+                        row_split_dot = ((str(row["QUERY"])).lower()).split(".")
+                        row_split_underscore = ((str(row["QUERY"])).lower()).split("_")
+# this section check any abbr
+                        for i in range(len(row_split)):
+                            if re.sub('[,\!\+\#\[\(\)\]\"?]', '', row_split[i]) in abbr_list:
+                                abbr_present_flag = 1
+                                abbr_dict[row_split.index(row_split[i])] = row_split[i]
+
+# this section is handle com, xom, .xom, .com, .com/ etc.
+
+                        if "com" in row_split:
+                            com_word_present_flag = 1
+                            com_word_dict[row_split.index("com")] = "com"
+                        if "xom" in row_split:
+                            xom_word_present_flag = 1
+                            xom_word_dict[row_split.index("xom")] = "xom"
+                        if ".com " in (row["QUERY"]).lower() or ".com/" in (row["QUERY"]).lower() or ((row["QUERY"]).lower()).endswith(".com"):
+                            com_present_flag = 1
+                            com_index = ((row["QUERY"]).lower()).index(".com")
+                            com_words_list = (row["QUERY"]).split(".")
+                            if com_words_list[-1] == "com":
+                                word_before_com = com_words_list[-2]
+                            else:
+                                for i in range(len(com_words_list)):
+                                    if "com/" in com_words_list[i] or "com " in com_words_list[i]:
+                                        word_before_com = com_words_list[i-1]
+
+                            row["QUERY"] = ((row["QUERY"]).lower()).replace(".com",'')
+
+                        if ",com " in (row["QUERY"]).lower() or ",com/" in (row["QUERY"]).lower() or ((row["QUERY"]).lower()).endswith(",com"):
+                            com_w_comma_present_flag = 1
+                            com_w_comma_index = ((row["QUERY"]).lower()).index(",com")
+                            com_w_comma_words_list = (row["QUERY"]).split(",")
+                            if com_w_comma_words_list[-1] == "com":
+                                word_before_com_w_comma = com_w_comma_words_list[-2]
+                            else:
+                                for i in range(len(com_w_comma_words_list)):
+                                    if "com/" in com_w_comma_words_list[i] or "com " in com_w_comma_words_list[i]:
+                                        word_before_com_w_comma = com_w_comma_words_list[i-1]
+
+                            row["QUERY"] = ((row["QUERY"]).lower()).replace(",com",'')
+
+                        if ".xom " in (row["QUERY"]).lower() or ".xom/" in (row["QUERY"]).lower() or ((row["QUERY"]).lower()).endswith(".xom"):
+                            xom_present_flag = 1
+                            xom_index = ((row["QUERY"]).lower()).index(".xom")
+                            xom_words_list = (row["QUERY"]).split(".")
+                            if xom_words_list[-1] == "xom":
+                                word_before_xom = xom_words_list[-2]
+                            else:
+                                for i in range(len(xom_words_list)):
+                                    if "xom/" in xom_words_list[i] or "xom " in xom_words_list[i]:
+                                        word_before_xom = xom_words_list[i-1]
+
+                            row["QUERY"] = ((row["QUERY"]).lower()).replace(".xom",'')
+                        
+                        if ".ca " in (row["QUERY"]).lower() or ".ca/" in (row["QUERY"]).lower() or ((row["QUERY"]).lower()).endswith(".ca"):
+                            ca_present_flag = 1
+                            ca_index = ((row["QUERY"]).lower()).index(".ca")
+                            ca_words_list = (row["QUERY"]).split(".")
+                            if ca_words_list[-1] == "ca":
+                                word_before_ca = ca_words_list[-2]
+                            else:
+                                for i in range(len(ca_words_list)):
+                                    if "ca/" in ca_words_list[i] or "ca " in ca_words_list[i]:
+                                        word_before_ca = ca_words_list[i-1]
+
+                            row["QUERY"] = ((row["QUERY"]).lower()).replace(".ca",'')
+
+                        if ".om " in (row["QUERY"]).lower() or ".om/" in (row["QUERY"]).lower() or ((row["QUERY"]).lower()).endswith(".om"):
+                            om_present_flag = 1
+                            om_index = ((row["QUERY"]).lower()).index(".om")
+                            om_words_list = (row["QUERY"]).split(".")
+                            if om_words_list[-1] == "ca":
+                                word_before_om = om_words_list[-2]
+                            else:
+                                for i in range(len(om_words_list)):
+                                    if "om/" in om_words_list[i] or "om " in om_words_list[i]:
+                                        word_before_om = om_words_list[i-1]
+
+                            row["QUERY"] = ((row["QUERY"]).lower()).replace(".om",'')
+
+                            
+                        with open('special_keywords.json', 'r') as f:
+                                dict_keyword = json.load(f)
+
+                        if self.CUSTOMER in dict_keyword.keys():
+                            flag = 0
+                            cust_list = dict_keyword[self.CUSTOMER]
+                            cust_name = dict()
+
+                            for word in cust_list:
+                                if len((row["QUERY"]).split(" ")) == 1 and (row["QUERY"]).lower() in cust_list:
+                                    if com_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                    if com_w_comma_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                    if xom_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                    if ca_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                    if abbr_present_flag == 1:
+                                        for idx,abbr in abbr_dict.items():
+                                                row["QUERY"] = row["QUERY"][:idx] + abbr + row["QUERY"][idx:]
+                                    if carte_flag == 1:
+                                        row["QUERY"] = row["QUERY"] + " card"
+
+                                    if "&quot;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                    if "&#39;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                    return pd.Series(
+                                                {
+                                                    "TRANSLATED_QUERY": row["QUERY"],
+                                                    "QUERY_LANGUAGE_CODE": "en",
+                                                    "QUERY_LANGUAGE": "English",
+                                                    "GCP_TRANSLATED_QUERY": row["QUERY"],
+                                                    "GCP_QUERY_LANGUAGE_CODE": row["QUERY_LANGUAGE_CODE"],
+                                                    "GCP_QUERY_LANGUAGE": row["QUERY_LANGUAGE"],
+                                                }
+                                            )
+                                if word in (row["QUERY"]).lower():
+                                    flag = 1
+                                    index = ((inp_keyword).lower()).index(word)
+                                    cust_name[index] = word
+                                    row["QUERY"] = ((row["QUERY"]).lower()).replace(word,'')
+                                
+                            cust_name = collections.OrderedDict(sorted(cust_name.items()))
+                            if abbr_present_flag == 1:
+                                inp_keyword_split = inp_keyword.split(" ")
+                                for abbr in abbr_dict.values():
+                                    for i in range(len(inp_keyword_split)):
+                                        if inp_keyword_split[i] == abbr:
+                                            inp_keyword_split[i] = ''
+                                    # inp_keyword = (inp_keyword.lower()).replace(abbr,'')
+                                inp_keyword = " ".join(inp_keyword_split)
+                            if com_word_present_flag == 1:
+                                for com in com_word_dict.values():
+                                    inp_keyword = (inp_keyword.lower()).replace(com,'')
+                            if xom_word_present_flag == 1:
+                                for xom in xom_word_dict.values():
+                                    inp_keyword = (inp_keyword.lower()).replace(xom,'')
+
+                            if com_present_flag == 1:
+                                inp_keyword = (inp_keyword.lower()).replace(".com",'')
+                            if com_w_comma_present_flag == 1:
+                                inp_keyword = (inp_keyword.lower()).replace(",com",'')
+                            if xom_present_flag == 1:
+                                inp_keyword = (inp_keyword.lower()).replace(".xom",'')
+                            if ca_present_flag == 1:
+                                inp_keyword = (inp_keyword.lower()).replace(".ca",'')
+                            if om_present_flag == 1:
+                                inp_keyword = (inp_keyword.lower()).replace(".om",'')
+                            if "carte" in row_split:
+                                carte_flag = 1
+                                inp_keyword = (inp_keyword.lower()).replace("carte",'')
+
+                            row["QUERY"] = inp_keyword
+                            for word in cust_name.values():
+                                row["QUERY"] = ((row["QUERY"]).lower()).replace(word,'')
+                            
+                            if flag == 1:
+                                resp = self.cloud_translation(row["QUERY"])
+                                if resp.status_code == 200:
+                                        response = [
+                                            json.loads(resp.content)["data"]["translations"][0][
+                                                "translatedText"
+                                            ],
+                                            json.loads(resp.content)["data"]["translations"][0][
+                                                "detectedSourceLanguage"
+                                            ],
+                                        ]
+                                        self.translation_calls = self.translation_calls + 1
+                                        new_lang = (
+                                            self.country_codes[
+                                                self.country_codes["LanguageCode"] == response[1]
+                                            ]["Language"]
+                                            .head(1)
+                                            .values
+                                        )
+                                        if new_lang:
+                                            language = new_lang[0]
+                                        else:
+                                            language = "Unassigned"
+                                        if response[1] == 'en':
+                                            for idx,word in cust_name.items():
+                                                row["QUERY"] = row["QUERY"][:idx] + word + row["QUERY"][idx:]
+                                            if abbr_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,abbr in abbr_dict.items():
+                                                    row_split_words.insert(idx,abbr)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            
+                                            if com_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,com in com_word_dict.items():
+                                                    row_split_words.insert(idx,com)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            if xom_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,xom in xom_word_dict.items():
+                                                    row_split_words.insert(idx,xom)
+                                                row["QUERY"] = " ".join(row_split_words)
+
+                                            if com_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                            if com_w_comma_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                            if xom_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                            if ca_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                            if om_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                            if "&quot;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                            if "&#39;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                            if carte_flag == 1:
+                                                row["QUERY"] = row["QUERY"] + " card"
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                            else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                        if row["QUERY"] == response[0] and row["IS_BRANDED"] == True and language != 'en'\
+                                            and ((ord(row["QUERY"][0]) in range(0, 123)) 
+                                                    or (ord(row["QUERY"][-1]) in range(0, 123))):
+                                            for idx,word in cust_name.items():
+                                                row["QUERY"] = row["QUERY"][:idx] + word + row["QUERY"][idx:]
+                                            if abbr_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,abbr in abbr_dict.items():
+                                                    row_split_words.insert(idx,abbr)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            
+                                            if com_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,com in com_word_dict.items():
+                                                    row_split_words.insert(idx,com)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            if xom_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,xom in xom_word_dict.items():
+                                                    row_split_words.insert(idx,xom)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            
+                                            if com_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                            if com_w_comma_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                            if xom_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                            if ca_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                            if om_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                            if "&quot;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                            if "&#39;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                            if carte_flag == 1:
+                                                row["QUERY"] = row["QUERY"] + " card"
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                            else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                        else:
+                                                resp_w_word = response[0]
+                                                for word in cust_name.values():
+                                                    resp_w_word = resp_w_word + " " + word
+                                                if com_present_flag == 1:
+                                                    if word_before_com in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_com,(word_before_com+".com"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".com"
+                                                if com_w_comma_present_flag == 1:
+                                                    if word_before_com_w_comma in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_com_w_comma,(word_before_com_w_comma+",com"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ",com"
+                                                if xom_present_flag == 1:
+                                                    if word_before_xom in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_xom,(word_before_xom+".xom"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".xom"
+                                                if ca_present_flag == 1:
+                                                    if word_before_ca in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_ca,(word_before_ca+".ca"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".ca"
+                                                if om_present_flag == 1:
+                                                    if word_before_om in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_om,(word_before_om+".om"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".om"
+
+                                                if abbr_present_flag == 1:
+                                                    for idx,abbr in abbr_dict.items():
+                                                        resp_w_word = resp_w_word + " " + abbr
+                                                if com_word_present_flag == 1:
+                                                    for idx,com in com_word_dict.items():
+                                                        resp_w_word = resp_w_word + " " + com
+                                                if xom_word_present_flag == 1:
+                                                    for idx,xom in xom_word_dict.items():
+                                                        resp_w_word = resp_w_word + " " + xom
+                                                if "&quot;" in resp_w_word:
+                                                    resp_w_word = (resp_w_word).replace("&quot;",'"')
+                                                if "&#39;" in resp_w_word:
+                                                    resp_w_word = (resp_w_word).replace("&#39;","'")
+                                                if carte_flag == 1:
+                                                    resp_w_word = resp_w_word + " card"
+                                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_word,
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                                                else:
+                                                    if "&quot;" in resp_w_word:
+                                                        resp_w_word = (resp_w_word).replace("&quot;",'"')
+                                                    if "&#39;" in resp_w_word:
+                                                        resp_w_word = (resp_w_word).replace("&#39;","'")
+                                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_word,
+                                                        "QUERY_LANGUAGE_CODE": response[1],
+                                                        "QUERY_LANGUAGE": language,
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                                else:
+                                    self.failed_translation_calls = (
+                                            self.failed_translation_calls + 1
+                                        )
+                                    for idx,word in cust_name.items():
+                                        row["QUERY"] = row["QUERY"][:idx] + word + row["QUERY"][idx:]
+                                    if abbr_present_flag == 1:
+                                        row_split_words = (row["QUERY"]).split(" ")
+                                        for idx,abbr in abbr_dict.items():
+                                            row_split_words.insert(idx,abbr)
+                                        row["QUERY"] = " ".join(row_split_words)
+                                    
+                                    if com_word_present_flag == 1:
+                                        row_split_words = (row["QUERY"]).split(" ")
+                                        for idx,com in com_word_dict.items():
+                                            row_split_words.insert(idx,com)
+                                        row["QUERY"] = " ".join(row_split_words)
+                                    if xom_word_present_flag == 1:
+                                        row_split_words = (row["QUERY"]).split(" ")
+                                        for idx,xom in xom_word_dict.items():
+                                            row_split_words.insert(idx,xom)
+                                        row["QUERY"] = " ".join(row_split_words)
+                                    
+                                    if com_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                    if com_w_comma_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                    if xom_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                    if ca_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                    if "&quot;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                    if "&#39;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                    if carte_flag == 1:
+                                        row["QUERY"] = row["QUERY"] + " card"
+                                        return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                    else:
+                                        if "&quot;" in row["QUERY"]:
+                                            row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                        if "&#39;" in row["QUERY"]:
+                                            row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                        return pd.Series(
+                                            {
+                                                "TRANSLATED_QUERY": row["QUERY"],
+                                                "QUERY_LANGUAGE_CODE": "en",
+                                                "QUERY_LANGUAGE": "English",
+                                                "GCP_TRANSLATED_QUERY": response[0],
+                                                "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                "GCP_QUERY_LANGUAGE": language,
+                                            }
+                                        )
+                            if flag == 0:             #No ARYK imp word present
+                                    resp = self.cloud_translation(row["QUERY"])
+                                    if resp.status_code == 200:
+                                        response = [
+                                            json.loads(resp.content)["data"]["translations"][0][
+                                                "translatedText"
+                                            ],
+                                            json.loads(resp.content)["data"]["translations"][0][
+                                                "detectedSourceLanguage"
+                                            ],
+                                        ]
+                                        self.translation_calls = self.translation_calls + 1
+                                        new_lang = (
+                                            self.country_codes[
+                                                self.country_codes["LanguageCode"] == response[1]
+                                            ]["Language"]
+                                            .head(1)
+                                            .values
+                                        )
+                                        if new_lang:
+                                            language = new_lang[0]
+                                        else:
+                                            language = "Unassigned"
+                                        if response[1] == 'en':
+                                            if abbr_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,abbr in abbr_dict.items():
+                                                    row_split_words.insert(idx,abbr)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            
+                                            if com_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,com in com_word_dict.items():
+                                                    row_split_words.insert(idx,com)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            if xom_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,xom in xom_word_dict.items():
+                                                    row_split_words.insert(idx,xom)
+                                                row["QUERY"] = " ".join(row_split_words)
+
+                                            if com_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                            if com_w_comma_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                            if xom_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                            if ca_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                            if om_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                            if "&quot;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                            if "&#39;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                            if carte_flag == 1:
+                                                row["QUERY"] = row["QUERY"] + " card"
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                            else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                        if row["QUERY"] == response[0] and row["IS_BRANDED"] == True and language != 'en'\
+                                            and ((ord(row["QUERY"][0]) in range(0, 123)) 
+                                                    or (ord(row["QUERY"][-1]) in range(0, 123))):
+                                            if abbr_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,abbr in abbr_dict.items():
+                                                    row_split_words.insert(idx,abbr)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            if com_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,com in com_word_dict.items():
+                                                    row_split_words.insert(idx,com)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                            if xom_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,xom in xom_word_dict.items():
+                                                    row_split_words.insert(idx,xom)
+                                                row["QUERY"] = " ".join(row_split_words)
+
+                                            if com_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                            if com_w_comma_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                            if xom_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                            if ca_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                            if om_present_flag == 1:
+                                                row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                            if "&quot;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                            if "&#39;" in row["QUERY"]:
+                                                row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                            if carte_flag == 1:
+                                                row["QUERY"] = row["QUERY"] + " card"
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                            else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                        else:
+                                                resp_w_word = response[0]
+                                                if com_present_flag == 1:
+                                                    if word_before_com in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_com,(word_before_com+".com"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".com"
+                                                if com_w_comma_present_flag == 1:
+                                                    if word_before_com_w_comma in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_com_w_comma,(word_before_com_w_comma+",com"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ",com"
+                                                if xom_present_flag == 1:
+                                                    if word_before_xom in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_xom,(word_before_xom+".xom"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".xom"
+                                                if ca_present_flag == 1:
+                                                    if word_before_ca in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_ca,(word_before_ca+".ca"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".ca"
+                                                if om_present_flag == 1:
+                                                    if word_before_om in resp_w_word:
+                                                        resp_w_word = resp_w_word.replace(word_before_om,(word_before_om+".om"))
+                                                    else:
+                                                        resp_w_word = resp_w_word + ".om"
+                                                if abbr_present_flag == 1:
+                                                    for idx,abbr in abbr_dict.items():
+                                                        resp_w_word = resp_w_word + " " + abbr
+
+                                                if com_word_present_flag == 1:
+                                                    for idx,com in com_word_dict.items():
+                                                        resp_w_word = resp_w_word + " " + com
+                                                if xom_word_present_flag == 1:
+                                                    for idx,xom in xom_word_dict.items():
+                                                        resp_w_word = resp_w_word + " " + xom
+                                                if "&quot;" in resp_w_word:
+                                                    resp_w_word = (resp_w_word).replace("&quot;",'"')
+                                                if "&#39;" in resp_w_word:
+                                                    resp_w_word = (resp_w_word).replace("&#39;","'")
+                                                if carte_flag == 1:
+                                                    resp_w_word = resp_w_word + " card"
+                                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_word,
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                                                else:
+                                                    if "&quot;" in resp_w_word:
+                                                        resp_w_word = (resp_w_word).replace("&quot;",'"')
+                                                    if "&#39;" in resp_w_word:
+                                                        resp_w_word = (resp_w_word).replace("&#39;","'")
+                                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_word,
+                                                        "QUERY_LANGUAGE_CODE": response[1],
+                                                        "QUERY_LANGUAGE": language,
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                                    else:
+                                        self.failed_translation_calls = (
+                                            self.failed_translation_calls + 1
+                                        )
+                                        if abbr_present_flag == 1:
+                                            row_split_words = (row["QUERY"]).split(" ")
+                                            for idx,abbr in abbr_dict.items():
+                                                row_split_words.insert(idx,abbr)
+                                            row["QUERY"] = " ".join(row_split_words)
+                                        if com_word_present_flag == 1:
+                                            row_split_words = (row["QUERY"]).split(" ")
+                                            for idx,com in com_word_dict.items():
+                                                row_split_words.insert(idx,com)
+                                            row["QUERY"] = " ".join(row_split_words)
+                                        if xom_word_present_flag == 1:
+                                            row_split_words = (row["QUERY"]).split(" ")
+                                            for idx,xom in xom_word_dict.items():
+                                                row_split_words.insert(idx,xom)
+                                            row["QUERY"] = " ".join(row_split_words)
+
+                                        if com_present_flag == 1:
+                                            row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                        if com_w_comma_present_flag == 1:
+                                            row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                        if xom_present_flag == 1:
+                                            row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                        if ca_present_flag == 1:
+                                            row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                        if om_present_flag == 1:
+                                            row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                        if "&quot;" in row["QUERY"]:
+                                            row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                        if "&#39;" in row["QUERY"]:
+                                            row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                        if carte_flag == 1:
+                                            row["QUERY"] = row["QUERY"] + " card"
+                                            return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                        else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                        #  this is for others customer#  this is for others customer
+                        else:
+                            resp = self.cloud_translation(row["QUERY"])
+                            if resp.status_code == 200:
+                                response = [
+                                    json.loads(resp.content)["data"]["translations"][0][
+                                        "translatedText"
+                                    ],
+                                    json.loads(resp.content)["data"]["translations"][0][
+                                        "detectedSourceLanguage"
+                                    ],
+                                ]
+                                self.translation_calls = self.translation_calls + 1
+                                new_lang = (
+                                    self.country_codes[
+                                        self.country_codes["LanguageCode"] == response[1]
+                                    ]["Language"]
+                                    .head(1)
+                                    .values
+                                )
+                                if new_lang:
+                                    language = new_lang[0]
+                                else:
+                                    language = "Unassigned"
+
+                                if row["QUERY"] == response[0] and row["IS_BRANDED"] == True and language != 'en'\
+                                    and ((ord(row["QUERY"][0]) in range(0, 123)) 
+                                            or (ord(row["QUERY"][-1]) in range(0, 123))):
+                                    if abbr_present_flag == 1:
+                                        row_split_words = (row["QUERY"]).split(" ")
+                                        for idx,abbr in abbr_dict.items():
+                                            row_split_words.insert(idx,abbr)
+                                        row["QUERY"] = " ".join(row_split_words)
+                                    if com_word_present_flag == 1:
+                                                row_split_words = (row["QUERY"]).split(" ")
+                                                for idx,com in com_word_dict.items():
+                                                    row_split_words.insert(idx,com)
+                                                row["QUERY"] = " ".join(row_split_words)
+                                    if xom_word_present_flag == 1:
+                                        row_split_words = (row["QUERY"]).split(" ")
+                                        for idx,xom in xom_word_dict.items():
+                                            row_split_words.insert(idx,xom)
+                                        row["QUERY"] = " ".join(row_split_words)
+
+                                    if com_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                    if com_w_comma_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                    if xom_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                    if ca_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                    if om_present_flag == 1:
+                                        row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                    if "&quot;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                    if "&#39;" in row["QUERY"]:
+                                        row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                    if carte_flag == 1:
+                                        row["QUERY"] = row["QUERY"] + " card"
+                                        return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+
+
+                                    else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+
+                                else:
+                                        resp_w_drug = response[0]
+                                        if com_present_flag == 1:
+                                            if word_before_com in resp_w_drug:
+                                                resp_w_drug = resp_w_drug.replace(word_before_com,(word_before_com+".com"))
+                                            else:
+                                                resp_w_drug = resp_w_drug + ".com"
+                                        if com_w_comma_present_flag == 1:
+                                            if word_before_com_w_comma in resp_w_drug:
+                                                resp_w_drug = resp_w_drug.replace(word_before_com_w_comma,(word_before_com_w_comma+",com"))
+                                            else:
+                                                resp_w_drug = resp_w_drug + ",com"
+                                        if xom_present_flag == 1:
+                                            if word_before_xom in resp_w_drug:
+                                                resp_w_drug = resp_w_drug.replace(word_before_xom,(word_before_xom+".xom"))
+                                            else:
+                                                resp_w_drug = resp_w_drug + ".xom"
+                                        if ca_present_flag == 1:
+                                            if word_before_ca in resp_w_drug:
+                                                resp_w_drug = resp_w_drug.replace(word_before_ca,(word_before_ca+".ca"))
+                                            else:
+                                                resp_w_drug = resp_w_drug + ".ca"
+                                        if om_present_flag == 1:
+                                            if word_before_om in resp_w_drug:
+                                                resp_w_drug = resp_w_drug.replace(word_before_om,(word_before_om+".om"))
+                                            else:
+                                                resp_w_drug = resp_w_drug + ".om"
+                                        if abbr_present_flag == 1:
+                                            for idx,abbr in abbr_dict.items():
+                                                resp_w_drug = resp_w_drug + " " +abbr
+                                        
+                                        if com_word_present_flag == 1:
+                                            for idx,com in com_word_dict.items():
+                                                resp_w_drug = resp_w_drug + " " + com
+                                        if xom_word_present_flag == 1:
+                                            for idx,xom in xom_word_dict.items():
+                                                resp_w_drug = resp_w_drug + " " + xom
+                                        if "&quot;" in resp_w_drug:
+                                            resp_w_drug = (resp_w_drug).replace("&quot;",'"')
+                                        if "&#39;" in resp_w_drug:
+                                            resp_w_drug = (resp_w_drug).replace("&#39;","'")
+                                        if carte_flag == 1:
+                                            resp_w_drug = resp_w_drug + " card"
+                                            return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_drug,
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                                        else:
+                                                    if "&quot;" in resp_w_drug:
+                                                        resp_w_drug = (resp_w_drug).replace("&quot;",'"')
+                                                    if "&#39;" in resp_w_drug:
+                                                        resp_w_drug = (resp_w_drug).replace("&#39;","'")
+                                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": resp_w_drug,
+                                                        "QUERY_LANGUAGE_CODE": response[1],
+                                                        "QUERY_LANGUAGE": language,
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                    )
+                            else:
+                                self.failed_translation_calls = (
+                                    self.failed_translation_calls + 1
+                                )
+                                if abbr_present_flag == 1:
+                                    row_split_words = (row["QUERY"]).split(" ")
+                                    for idx,abbr in abbr_dict.items():
+                                        row_split_words.insert(idx,abbr)
+                                    row["QUERY"] = " ".join(row_split_words)
+                                if com_word_present_flag == 1:
+                                    row_split_words = (row["QUERY"]).split(" ")
+                                    for idx,com in com_word_dict.items():
+                                        row_split_words.insert(idx,com)
+                                    row["QUERY"] = " ".join(row_split_words)
+                                if xom_word_present_flag == 1:
+                                    row_split_words = (row["QUERY"]).split(" ")
+                                    for idx,xom in xom_word_dict.items():
+                                        row_split_words.insert(idx,xom)
+                                    row["QUERY"] = " ".join(row_split_words)
+
+                                if com_present_flag == 1:
+                                    row["QUERY"] = row["QUERY"][:com_index] + ".com" + row["QUERY"][com_index:]
+                                if com_w_comma_present_flag == 1:
+                                    row["QUERY"] = row["QUERY"][:com_w_comma_index] + ",com" + row["QUERY"][com_w_comma_index:]
+                                if xom_present_flag == 1:
+                                    row["QUERY"] = row["QUERY"][:xom_index] + ".xom" + row["QUERY"][xom_index:]
+                                if ca_present_flag == 1:
+                                    row["QUERY"] = row["QUERY"][:ca_index] + ".ca" + row["QUERY"][ca_index:]
+                                if om_present_flag == 1:
+                                    row["QUERY"] = row["QUERY"][:om_index] + ".om" + row["QUERY"][om_index:]
+                                if "&quot;" in row["QUERY"]:
+                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                if "&#39;" in row["QUERY"]:
+                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                if carte_flag == 1:
+                                    row["QUERY"] = row["QUERY"] + " card"
+                                    return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "fr",
+                                                        "QUERY_LANGUAGE": "French",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                                else:
+                                                if "&quot;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                                                if "&#39;" in row["QUERY"]:
+                                                    row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                                                return pd.Series(
+                                                    {
+                                                        "TRANSLATED_QUERY": row["QUERY"],
+                                                        "QUERY_LANGUAGE_CODE": "en",
+                                                        "QUERY_LANGUAGE": "English",
+                                                        "GCP_TRANSLATED_QUERY": response[0],
+                                                        "GCP_QUERY_LANGUAGE_CODE": response[1],
+                                                        "GCP_QUERY_LANGUAGE": language,
+                                                    }
+                                                )
+                    
+        # this section is for passby translation                
+                else:
+                    self.passby_translation_calls = self.passby_translation_calls + 1
+                    if "&quot;" in row["QUERY"]:
+                        row["QUERY"] = (row["QUERY"]).replace("&quot;",'"')
+                    if "&#39;" in row["QUERY"]:
+                        row["QUERY"] = (row["QUERY"]).replace("&#39;","'")
+                    return pd.Series(
+                        {
+                            "TRANSLATED_QUERY": row["QUERY"],
+                            "QUERY_LANGUAGE_CODE": row["QUERY_LANGUAGE_CODE"],
+                            "QUERY_LANGUAGE": row["QUERY_LANGUAGE"],
+                            "GCP_TRANSLATED_QUERY": None,
+                            "GCP_QUERY_LANGUAGE_CODE": None,
+                            "GCP_QUERY_LANGUAGE": None,
+                        }
+                    )
+                    
+        # this section is for failed translation       
+            except Exception as e:
+                self.failed_translation_calls = self.failed_translation_calls + 1
+                logging.error("Translation Error %s" % (e))
+                self.update_intent_table()
+                if (self.translation_calls / self.BATCH_SIZE).is_integer():
+                    logging.info(self.translation_calls)
+                return pd.Series(
+                    {
+                        "TRANSLATED_QUERY": None,
+                        "QUERY_LANGUAGE_CODE": row["QUERY_LANGUAGE_CODE"],
+                        "QUERY_LANGUAGE": row["QUERY_LANGUAGE"],
+                        "GCP_TRANSLATED_QUERY": None,
+                        "GCP_QUERY_LANGUAGE_CODE": None,
+                        "GCP_QUERY_LANGUAGE": None,
+                    }
+                )
+
+
+#transation starts
+    def get_keyword_translation(self, row):
+        self.keyword_df.drop_duplicates(["QUERY"], keep="last", inplace=True)
+# for those keywords whose language is English
+        if row["QUERY_LANGUAGE_CODE"] == "en":
+            self.passby_translation_calls = self.passby_translation_calls + 1
+            return pd.Series(
+                {
+                    "TRANSLATED_QUERY": row["QUERY"],
+                    "QUERY_LANGUAGE_CODE": row["QUERY_LANGUAGE_CODE"],
+                    "QUERY_LANGUAGE": row["QUERY_LANGUAGE"],
+                    "GCP_TRANSLATED_QUERY": None,
+                    "GCP_QUERY_LANGUAGE_CODE": None,
+                    "GCP_QUERY_LANGUAGE": None,
+                }
+            )
+# for those keywords whose translation was not done by polyglot
+        elif row["TRANSLATED_QUERY"] is not None:
+            self.passby_translation_calls = self.passby_translation_calls + 1
+            return pd.Series(
+                {
+                    "TRANSLATED_QUERY": row["TRANSLATED_QUERY"],
+                    "QUERY_LANGUAGE_CODE": row["QUERY_LANGUAGE_CODE"],
+                    "QUERY_LANGUAGE": row["QUERY_LANGUAGE"],
+                    "GCP_TRANSLATED_QUERY": row["GCP_TRANSLATED_QUERY"],
+                    "GCP_QUERY_LANGUAGE_CODE": row["GCP_QUERY_LANGUAGE_CODE"],
+                    "GCP_QUERY_LANGUAGE": row["GCP_QUERY_LANGUAGE"],
+                }
+            )
+
+#from here code is for all the keywords with language as non-english
+        else:
+            try:
+
+# initialisation for translation job
                 if (
                     self.validate_digits_special_charaters(row["QUERY"].strip("\u202c"))
                     and len(row["QUERY"]) < 150
@@ -480,10 +1529,13 @@ class LanguageDetectorTranslator:
                     row_split = ((str(row["QUERY"])).lower()).split(" ")
                     row_split_dot = ((str(row["QUERY"])).lower()).split(".")
                     row_split_underscore = ((str(row["QUERY"])).lower()).split("_")
+# this section check any abbr
                     for i in range(len(row_split)):
                         if re.sub('[,\!\+\#\[\(\)\]\"?]', '', row_split[i]) in abbr_list:
                             abbr_present_flag = 1
                             abbr_dict[row_split.index(row_split[i])] = row_split[i]
+
+# this section is handle com, xom, .xom, .com, .com/ etc.
 
                     if "com" in row_split:
                         com_word_present_flag = 1
@@ -556,6 +1608,9 @@ class LanguageDetectorTranslator:
                                     word_before_om = om_words_list[i-1]
 
                         row["QUERY"] = ((row["QUERY"]).lower()).replace(".om",'')
+
+#  this is the part where NVSO, NVSP and NVS is taken care of
+                    
 
                     if self.CUSTOMER == 'NVSP' or self.CUSTOMER == 'NVSO' or self.CUSTOMER == 'NVS':
                         flag = 0
@@ -1109,6 +2164,7 @@ class LanguageDetectorTranslator:
                                                 }
                                             )  
                     #############################################
+#  this is the part where ARYK customer is taken care of
                     elif self.CUSTOMER == 'ARYK':
                         flag = 0
                         aryk_list = self.get_aryk_list(self.CUSTOMER)
@@ -1733,6 +2789,8 @@ class LanguageDetectorTranslator:
                                                     "GCP_QUERY_LANGUAGE": language,
                                                 }
                                             )
+                    
+#  this is for others customer
                     else:
                         resp = self.cloud_translation(row["QUERY"])
                         if resp.status_code == 200:
@@ -1949,6 +3007,8 @@ class LanguageDetectorTranslator:
                                                     "GCP_QUERY_LANGUAGE": language,
                                                 }
                                             )
+                
+# this section is for passby translation                
                 else:
                     self.passby_translation_calls = self.passby_translation_calls + 1
                     if "&quot;" in row["QUERY"]:
@@ -1965,6 +3025,8 @@ class LanguageDetectorTranslator:
                             "GCP_QUERY_LANGUAGE": None,
                         }
                     )
+            
+# this section is for failed translation       
             except Exception as e:
                 self.failed_translation_calls = self.failed_translation_calls + 1
                 logging.error("Translation Error %s" % (e))
@@ -1994,7 +3056,7 @@ def main():
                 "GCP_TRANSLATED_QUERY",
                 "GCP_QUERY_LANGUAGE_CODE",
                 "GCP_QUERY_LANGUAGE",
-            ]] = lt.keyword_df.apply(lt.get_keyword_translation, axis=1)
+            ]] = lt.keyword_df.apply(lt.get_translation_independent, axis=1)
         logging.info("Failed Translation Calls %s" % lt.failed_translation_calls)
         logging.info("Skipped Translation Calls %s" % lt.passby_translation_calls)
         logging.info("Translation Calls %s" % lt.translation_calls)
@@ -2008,8 +3070,8 @@ def main():
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": "Translation Job Updates for *{0}*".format(
-                            os.environ["CUSTOMER"]
+                        "text": "Translation Job Updates for *{0}*".format( "NVSO"
+                            # os.environ["CUSTOMER"] 
                         ),
                     }
                 ],
@@ -2019,7 +3081,9 @@ def main():
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": "Batch Size:* {0}*".format(os.environ["QUERY_LIMIT"]),
+                        "text": "Batch Size:* {0}*".format(1000
+                            # os.environ["QUERY_LIMIT"] 
+                            ),
                     },
                     {
                         "type": "mrkdwn",
