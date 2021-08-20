@@ -1,0 +1,202 @@
+{
+    "jobDefinitionName": "",
+    "type": "multinode",
+    "parameters": {
+        "KeyName": ""
+    },
+    "containerProperties": {
+        "image": "",
+        "vcpus": 0,
+        "memory": 0,
+        "command": [
+            ""
+        ],
+        "jobRoleArn": "",
+        "volumes": [
+            {
+                "host": {
+                    "sourcePath": ""
+                },
+                "name": ""
+            }
+        ],
+        "environment": [
+            {
+                "name": "SNOWFLAKE_ACCOUNT",
+                "value": ""
+            },
+            {
+                "name": "SNOWFLAKE_PASSWORD",
+                "value": ""
+            },
+            {
+                "name": "BASE_QUERY",
+                "value": ""
+            },
+            {
+                "name": "SNOWFLAKE_INTENT_TABLE",
+                "value": ""
+            },
+            {
+                "name": "COUNTRY_MAPPING_PATH",
+                "value": ""
+            },
+            {
+                "name": "SNOWFLAKE_ROLE",
+                "value": ""
+            },
+            {
+                "name": "TEMP_TABLE_CLEANUP",
+                "value": ""
+            },
+            {
+                "name": "QUERY_LIMIT",
+                "value": ""
+            },
+            {
+                "name": "S3_BACKUP",
+                "value": ""
+            },
+            {
+                "name": "API_KEY",
+                "value": ""
+            },
+            {
+                "name": "BATCH_SIZE",
+                "value": ""
+            },
+            {
+                "name": "SCHEMA",
+                "value": ""
+            },
+            {
+                "name": "SLACK_WEBHOOK",
+                "value": ""
+            },
+            {
+                "name": "CUSTOMER",
+                "value": ""
+            },
+            {
+                "name": "DEPLOY_ENVIRONMENT",
+                "value": ""
+            },
+            {
+                "name": "BKP_DEPLOY",
+                "value": ""
+            },
+            {
+                "name": "SNOWFLAKE_USER",
+                "value": ""
+            }
+        ],
+        "mountPoints": [
+            {
+                "containerPath": "",
+                "readOnly": true,
+                "sourceVolume": ""
+            }
+        ],
+        "readonlyRootFilesystem": true,
+        "privileged": true,
+        "ulimits": [
+            {
+                "hardLimit": 0,
+                "name": "",
+                "softLimit": 0
+            }
+        ],
+        "user": "",
+        "instanceType": "",
+        "resourceRequirements": [
+            {
+                "value": "",
+                "type": "GPU"
+            }
+        ],
+        "linuxParameters": {
+            "devices": [
+                {
+                    "hostPath": "",
+                    "containerPath": "",
+                    "permissions": [
+                        "WRITE"
+                    ]
+                }
+            ]
+        }
+    },
+    "nodeProperties": {
+        "numNodes": 0,
+        "mainNode": 0,
+        "nodeRangeProperties": [
+            {
+                "targetNodes": "",
+                "container": {
+                    "image": "",
+                    "vcpus": 0,
+                    "memory": 0,
+                    "command": [
+                        ""
+                    ],
+                    "jobRoleArn": "",
+                    "volumes": [
+                        {
+                            "host": {
+                                "sourcePath": ""
+                            },
+                            "name": ""
+                        }
+                    ],
+                    "environment": [
+                        {
+                            "name": "",
+                            "value": ""
+                        }
+                    ],
+                    "mountPoints": [
+                        {
+                            "containerPath": "",
+                            "readOnly": true,
+                            "sourceVolume": ""
+                        }
+                    ],
+                    "readonlyRootFilesystem": true,
+                    "privileged": true,
+                    "ulimits": [
+                        {
+                            "hardLimit": 0,
+                            "name": "",
+                            "softLimit": 0
+                        }
+                    ],
+                    "user": "",
+                    "instanceType": "",
+                    "resourceRequirements": [
+                        {
+                            "value": "",
+                            "type": "GPU"
+                        }
+                    ],
+                    "linuxParameters": {
+                        "devices": [
+                            {
+                                "hostPath": "",
+                                "containerPath": "",
+                                "permissions": [
+                                    "WRITE"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            }
+        ]
+    },
+    "retryStrategy": {
+        "attempts": 0
+    },
+    "timeout": {
+        "attemptDurationSeconds": 0
+    }
+}
