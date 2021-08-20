@@ -34,37 +34,31 @@ class LanguageDetectorTranslator:
 
 # constructor
     def __init__(self):
-        USER = os.environ.get("SNOWFLAKE_USER") or 'AWS_USER'
-        PASSWORD = os.environ.get("SNOWFLAKE_PASSWORD") or '56gdd3de1xt2sdgSs1'
-        ACCOUNT = os.environ.get("SNOWFLAKE_ACCOUNT") or 'vr09222.us-east-2.aws'
-        ROLE = os.environ.get("SNOWFLAKE_ROLE") or 'SYSADMIN'
-        # self.country_codes = pd.read_csv(os.environ.get("COUNTRY_MAPPING_PATH"))
-        self.country_codes = pd.read_csv(r'/Users/subhayan_pc/Documents/Quattr/keyword_language_translations/language_mapping.csv')
+        USER = os.environ.get("SNOWFLAKE_USER")
+        PASSWORD = os.environ.get("SNOWFLAKE_PASSWORD")
+        ACCOUNT = os.environ.get("SNOWFLAKE_ACCOUNT") 
+        ROLE = os.environ.get("SNOWFLAKE_ROLE")
+        self.country_codes = pd.read_csv(os.environ.get("COUNTRY_MAPPING_PATH"))
         self.translation_calls = 0
         self.failed_translation_calls = 0
         self.passby_translation_calls = 0
-        self.CUSTOMER = os.environ.get("CUSTOMER") or 'ARYK'
-        self.DEPLOY_ENVIRONMENT = os.environ.get("DEPLOY_ENVIRONMENT") or 'BACKUP_DB'
-        self.INTENT_TABLE = os.environ.get("SNOWFLAKE_INTENT_TABLE") or 'intent_lookup_test_hund'
+        self.CUSTOMER = os.environ.get("CUSTOMER") 
+        self.DEPLOY_ENVIRONMENT = os.environ.get("DEPLOY_ENVIRONMENT") 
+        self.INTENT_TABLE = os.environ.get("SNOWFLAKE_INTENT_TABLE") 
         self.LOOKUP_TABLE = os.environ.get("SNOWFLAKE_LOOKUP_TABLE")
-        self.SCHEMA = os.environ.get("SCHEMA") or 'CLICKSTREAM_ANALYTICS_ARYK'
-        self.BKP_DEPLOY = os.environ.get("BKP_DEPLOY") or 'BACKUP_DB'
-        self.API_KEY = os.environ.get("API_KEY") or 'AIzaSyBofuxaa1n79Ejut8E69KgUJlEQCfDFiCU'
-        self.QUERY_LIMIT = os.environ.get("QUERY_LIMIT") or 1000
+        self.SCHEMA = os.environ.get("SCHEMA") 
+        self.BKP_DEPLOY = os.environ.get("BKP_DEPLOY") 
+        self.API_KEY = os.environ.get("API_KEY") 
+        self.QUERY_LIMIT = os.environ.get("QUERY_LIMIT")
         self.SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK")
         self.API_ENDPOINT = "https://translation.googleapis.com/language/translate/v2?target=en&key={1}&q={0}"
-        # self.NEW_KEYWORDS = os.environ.get("BASE_QUERY").format(
-        #     self.DEPLOY_ENVIRONMENT, self.SCHEMA, self.INTENT_TABLE, self.QUERY_LIMIT
-        # )
-        self.NEW_KEYWORDS = ("select distinct QUERY, QUERY_LANGUAGE, TRANSLATED_QUERY, INTENT, QUERY_LANGUAGE_CODE, IS_BRANDED from {0}.{1}.{2} where TRANSLATED_QUERY is null or QUERY_LANGUAGE_CODE is null LIMIT {3}").format(
+        self.NEW_KEYWORDS = os.environ.get("BASE_QUERY").format(
             self.DEPLOY_ENVIRONMENT, self.SCHEMA, self.INTENT_TABLE, self.QUERY_LIMIT
         )
-        #PROD.CLICKSTREAM_ANALYTICS_HSNG.INTENT_LOOKUP 
-        #BASE_QUERY=select distinct QUERY, QUERY_LANGUAGE, TRANSLATED_QUERY, INTENT, QUERY_LANGUAGE_CODE, IS_BRANDED from {0}.{1}.{2} where TRANSLATED_QUERY is null or QUERY_LANGUAGE_CODE is null LIMIT {3}
         self.S3_BACKUP = "{0}_job_{1}{2}".format(
             os.environ.get("S3_BACKUP"), time.time(), ".csv.gzip"
         )
-        self.BATCH_SIZE = int(os.environ.get("BATCH_SIZE") or 1000)
+        self.BATCH_SIZE = int(os.environ.get("BATCH_SIZE") )
         self.s3 = s3fs.S3FileSystem(anon=False)
         # self.model = fasttext.load_model("./lid.176.ftz")
         self.temp_table = None

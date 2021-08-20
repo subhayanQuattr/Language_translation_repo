@@ -8,12 +8,6 @@ COPY ./KeywordLanguageTranslations.py .
 
 COPY ./lid.176.ftz .
 
-ADD ./NVSO_data ./NVSO_data
-
-ADD ./NVSP_data ./NVSP_data
-
-ADD ./NVS_data ./NVS_data
-
-ADD ./ARYK_data ./ARYK_data
+COPY ./special_keywords.json .
 
 CMD ["python", "./KeywordLanguageTranslations.py" ]
