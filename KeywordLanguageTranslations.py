@@ -574,8 +574,8 @@ class LanguageDetectorTranslator:
                             row["QUERY"] = ((row["QUERY"]).lower()).replace(".om",'')
 
                             
-                        with open('special_keywords.json', 'r') as f:
-                                dict_keyword = json.load(f)
+                        # with open('special_keywords.json', 'r') as f:
+                        #         dict_keyword = json.load(f)
 
                         if self.CUSTOMER in dict_keyword.keys():
                             flag = 0
